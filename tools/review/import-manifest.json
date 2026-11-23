@@ -255,7 +255,7 @@
       "destination": "runner/prices.json",
       "mode": "100644",
       "upstream_sha256": "387b989081a150ba9b3eb0cdfb8353c59c38a28f4688256a155bbc05c63645ce",
-      "import_sha256": "875be1f0b17590b325e4ca91b5ac300bc439d2587c4cf42336c48ee12e9df554",
+      "import_sha256": "b92407a7ae9b1bc02a925fe9d48ca81348ec394153308a5cabd1d933e8a77fe4",
       "adapted": [
         {
           "pr": 172,
@@ -272,7 +272,7 @@
       "destination": "runner/pricing.py",
       "mode": "100644",
       "upstream_sha256": "91a4438a4459e5c527fd5cb3aa58613e9613f8b8db5bb926653b0213dd075f30",
-      "import_sha256": "0db86aa4dd0019a3b2fa90e7308066f52c823c81f86fe2ea8d5864818c6c0a9e",
+      "import_sha256": "7ab7e7c8079d2b0d66273d80166842e5ef79e9b82c264654a881914c27eae1ae",
       "adapted": [
         {
           "pr": 148,
@@ -305,14 +305,14 @@
       "destination": "runner/review.py",
       "mode": "100644",
       "upstream_sha256": "46e109b3eba83610a804ec80aac13d74f4f52e9acf5629ec1a5a02b72af36859",
-      "import_sha256": "a41dee3d53316751e33a48e0e1674ee8bd2e30b105886c69fba8f4b97bb50d27"
+      "import_sha256": "98bf3a2a88beb3fbf21b2de309e636bbe5e8826dfcaa0fbe234c7d2d79ba31bc"
     },
     {
       "source": "runner/reviewers.py",
       "destination": "runner/reviewers.py",
       "mode": "100644",
       "upstream_sha256": "abc9a219d3923e6deaf2a6cb8d9c46cb51e43ac8363f6d54e115c96a34e2cfc2",
-      "import_sha256": "fb76e2e843dbb48c66fbc5f8049ae67a776171c62f6233b43d445203fd19891d",
+      "import_sha256": "61f733e314e2795b82c83a6b157b1803ee959eac2bd8ae511c58ad8a8fa307b6",
       "adapted": [
         {
           "pr": 194,
@@ -401,7 +401,7 @@
       "destination": "tests/test_prices.py",
       "mode": "100644",
       "upstream_sha256": "e84bfe34f3f60469ae687511bf1696426c2a8ef530c1058b72fe6410dd4a6a8a",
-      "import_sha256": "c6732a476b1cad2b5cf83fc78a91ddd2abf539160f106a17b21d74fee061c607",
+      "import_sha256": "9e4ec626a996cb015d05af24175bd11a30960b6545415ab0e291e7a110cc742a",
       "adapted": [
         {
           "pr": 172,

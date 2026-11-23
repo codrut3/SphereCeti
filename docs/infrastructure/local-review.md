@@ -210,7 +210,9 @@ inputs, `--head`/`--base`/`--description-file`) need an explicit number.
 
 `--auth api` uses the selected provider's API credential instead.
 Supported providers are the imported engine's Claude, Sonnet, Codex, Kiro, DeepSeek, MiniMax,
-and Grok adapters. Tests invoke only a fake executable, never these services.
+and Grok adapters, plus SphereCeti's direct Google Gemini API adapter (`--provider gemini`,
+driven through the read-only `pi` agent with `GEMINI_API_KEY`). Tests invoke only a fake
+executable, never these services.
 
 Without `--source-repo` or local dependency stores, the adapter fetches exact commits into
 its private Git cache. It never checks out or executes candidate configuration. An explicit
@@ -381,6 +383,21 @@ Following [#148](https://github.com/TauCetiProject/TauCetiReview/pull/148)
 round token totals use one convention across providers: `input_tokens` is all input traffic,
 with fresh, cache-read and cache-write components. Archived runs keep the provider's raw
 usage and exact model.
+
+## Gemini model selection and accounting
+
+`--provider gemini` drives a direct Google Gemini API model through the `pi` agent
+(`pi --provider google`, read-only `read,grep,ls` tools, no shell/edit/write) using
+`GEMINI_API_KEY` from the environment (in both `--auth api` and default `--auth subscription`
+modes, matching the OpenRouter `pi` adapters).
+
+`--gemini-model MODEL` pins the exact Gemini model for both `review` and `worker run --execute`;
+otherwise the default `gemini-4-carbon` applies. Priced models in `runner/prices.json` are
+`gemini-4-carbon`, `gemini-4-argon`, `gemini-4-neon`, `gemini-4-hydrogen`, and `gemini-3.8-flash`
+(from `ai.google.dev/gemini-api/docs/pricing`; implicit caching only, no cache-write fee, unified
+1M context window). Unpriced models are rejected before inference. Token accounting follows the
+`pi` convention (`input` fresh + `cacheRead` cached, with thinking tokens billed in `output`),
+normalized into comparable round totals alongside the other providers.
 
 ## Validation and next boundary
 

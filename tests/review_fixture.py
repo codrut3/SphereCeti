@@ -99,6 +99,7 @@ prompt = sys.stdin.read()
 root = pathlib.Path(__file__).parent
 assert "GH_TOKEN" not in os.environ
 assert "OPENAI_API_KEY" not in os.environ
+assert "GEMINI_API_KEY" not in os.environ
 assert "PERSONAL_SECRET" not in os.environ
 assert os.environ.get("ANTHROPIC_API_KEY") == "test-provider-key"
 assert ".tauceti-rev/rev-claude-" in os.environ["HOME"]
@@ -131,7 +132,7 @@ auth = home / "auth.json"
 call = {"argv": sys.argv[1:], "openai_key": os.environ.get("OPENAI_API_KEY"),
         "codex_home": str(home), "tmpdir": os.environ.get("TMPDIR"), "home": os.environ["HOME"],
         "auth": auth.read_text() if auth.exists() else None,
-        "leaked": sorted(k for k in ("GH_TOKEN", "PERSONAL_SECRET", "ANTHROPIC_API_KEY") if k in os.environ)}
+        "leaked": sorted(k for k in ("GH_TOKEN", "PERSONAL_SECRET", "ANTHROPIC_API_KEY", "GEMINI_API_KEY") if k in os.environ)}
 if sys.argv[1:3] == ["login", "--with-api-key"]:
     call["login_key"] = sys.stdin.read()
     with (root / "codex-calls.jsonl").open("a") as f:
@@ -194,9 +195,50 @@ if (root / "codex-exit").exists():  # report everything, then fail
     sys.exit(int((root / "codex-exit").read_text()))
 ''')
         (self.bin / "codex").chmod(0o755)
+        # pi's JSONL event shape (`message_end`), with fresh `input` separate from `cacheRead`.
+        (self.bin / "pi").write_text(f'#!{sys.executable}\n' + r'''
+import json, os, pathlib, re, sys
+root = pathlib.Path(__file__).parent
+prompt = sys.stdin.read()
+call = {"argv": sys.argv[1:], "home": os.environ["HOME"],
+        "gemini_key": os.environ.get("GEMINI_API_KEY"),
+        "openrouter_key": os.environ.get("OPENROUTER_API_KEY"),
+        "leaked": sorted(k for k in ("GH_TOKEN", "PERSONAL_SECRET", "ANTHROPIC_API_KEY",
+                                     "OPENAI_API_KEY", "OPENROUTER_API_KEY") if k in os.environ),
+        "prompt_ok": "SphereCeti" in prompt and "APPROVED SENTINEL" in prompt and "PROPOSED SENTINEL" in prompt,
+        "pgid_is_own": os.getpgid(0) == os.getpid()}
+with (root / "pi-calls.jsonl").open("a") as f:
+    f.write(json.dumps(call) + "\n")
+if (root / "pi-hang").exists():
+    import subprocess, time
+    child = subprocess.Popen([sys.executable, "-c", "import time\nwhile True: time.sleep(1)"])
+    with (root / "pi-pids.jsonl").open("a") as f:
+        f.write(json.dumps({"leader": os.getpid(), "child": child.pid}) + "\n")
+    while True:
+        time.sleep(1)
+if (root / "pi-error").exists():
+    msg = (root / "pi-error").read_text().strip()
+    print(json.dumps({"type": "message_end", "message": {
+        "role": "assistant", "content": [], "stopReason": "error", "errorMessage": msg,
+        "usage": {"input": 0, "output": 0, "cacheRead": 0, "cost": {"total": 0.0}}}}))
+    sys.exit(0)
+marker = re.findall(r"TAUCETI-VERDICT-[a-z0-9]+", prompt)[-1]
+verdict = {"verdict": (root / "mode").read_text().strip(), "summary": "Fake Gemini pi result", "findings": []}
+usage = {"input": 20000, "cacheRead": 80000, "output": 1000, "reasoning": 400, "cost": {"total": 9.99}}
+if (root / "pi-usage.json").exists():
+    usage = json.loads((root / "pi-usage.json").read_text())
+print(json.dumps({"type": "message_end", "message": {
+    "role": "assistant",
+    "content": [{"type": "text", "text": marker + "\n" + json.dumps(verdict)}],
+    "stopReason": "stop", "usage": usage}}))
+if (root / "pi-exit").exists():
+    sys.exit(int((root / "pi-exit").read_text()))
+''')
+        (self.bin / "pi").chmod(0o755)
         self.env ={**os.environ, "HOME": str(self.home), "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
                     "GH_TOKEN": "test-github-token-must-not-reach-provider", "PERSONAL_SECRET": "test-personal-secret",
-                    "ANTHROPIC_API_KEY": "test-provider-key", "OPENAI_API_KEY": "test-unselected-provider"}
+                    "ANTHROPIC_API_KEY": "test-provider-key", "OPENAI_API_KEY": "test-unselected-provider",
+                    "OPENROUTER_API_KEY": "test-unselected-openrouter", "GEMINI_API_KEY": "test-gemini-key"}
         self.env.pop("PYTHONPATH", None)
         self.env.pop("CODEX_HOME", None)
 
@@ -226,6 +268,14 @@ if (root / "codex-exit").exists():  # report everything, then fail
 
     def codex_debug_calls(self):
         path = self.bin / "codex-debug.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def pi_calls(self):
+        path = self.bin / "pi-calls.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def pi_pids(self):
+        path = self.bin / "pi-pids.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
     def codex_subscription(self, login='{"auth_mode": "chatgpt", "tokens": "FAKE-CHATGPT-LOGIN"}'):

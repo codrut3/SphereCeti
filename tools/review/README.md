@@ -84,6 +84,12 @@ The local changes are:
   was not stopped (with a write-ahead in-flight ledger marker). It rejects a failed attempt's
   verdict and starts no further attempt or rubric after an unknown one. See
   [when the worker stops spending](../../docs/infrastructure/worker-execution.md#when-the-worker-stops-spending).
+- Add explicit direct Google Gemini API support (`--provider gemini`, `--gemini-model`,
+  default `gemini-4-carbon`) in `runner/reviewers.py`, `runner/review.py`, `runner/pricing.py`,
+  `runner/prices.json`, and `tests/test_prices.py`, marked `SphereCeti local adaptation`. It
+  reuses `run_pi` with `--provider google`, `GEMINI_API_KEY`, and read-only `PI_TOOLS`
+  (`read,grep,ls`), propagates attempt timeouts and nonzero-exit unknown-usage checks, and prices
+  `gemini-4-carbon`, `gemini-4-argon`, `gemini-4-neon`, `gemini-4-hydrogen`, and `gemini-3.8-flash`.
 
 Provider adapters, contests, shadow runs, budgeting, rendering, and verdict semantics otherwise
 remain upstream's. In particular, the legacy scoreboard rules are preserved for their regression

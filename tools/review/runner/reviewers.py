@@ -252,6 +252,11 @@ def reviewer_env(provider, keys, subscription=False):
             src = _kiro_auth_db()
             if src.exists():
                 _copy_kiro_auth_db(src, _kiro_data_dir(home) / "data.sqlite3")
+    elif provider == "gemini":
+        # SphereCeti local adaptation: direct Google Gemini API via pi (`--provider google`).
+        # Always uses GEMINI_API_KEY (no subscription/OAuth path); the clean throwaway HOME carries
+        # only this key, and read-only PI_TOOLS keeps the reviewer shell-free.
+        env["GEMINI_API_KEY"] = keys.get("gemini", "")
     elif provider in OPENROUTER_MODELS:
         # OpenRouter via pi: there is no subscription/OAuth concept — it is always an API
         # key, in both auth modes. The clean HOME carries ONLY this key, so a prompt-injected
@@ -747,25 +752,28 @@ def run_kiro(prompt, cwd, model, env):
 
 
 
-def run_pi(prompt, cwd, model, env):
-    """Drive an OpenRouter model through the `pi` agent (badlogic/pi-mono), read-only.
+def run_pi(prompt, cwd, model, env, pi_provider="openrouter"):
+    """Drive a model through the `pi` agent (badlogic/pi-mono), read-only.
 
     pi runs agentic loops with arbitrary models that the claude/codex CLIs can't drive, so
-    it is how DeepSeek/MiniMax (and any other OpenRouter model in OPENROUTER_MODELS) review.
+    it is how OpenRouter models in OPENROUTER_MODELS and direct Google Gemini API models
+    (`pi_provider="google"`, SphereCeti local adaptation) review.
     Same isolation as the other reviewers: the clean HOME from reviewer_env carries only
-    OPENROUTER_API_KEY, and we disable project context files, skills, extensions, and prompt
+    this provider's API key, and we disable project context files, skills, extensions, and prompt
     templates and restrict tools to PI_TOOLS (read/grep/ls — no bash/edit/write), so the
     untrusted diff cannot make the reviewer run shell, mutate the workspace, or reach anything
     but its own key. `--mode json` emits a JSONL event stream; the final assistant `message_end`
     carries the verdict text and pi-ai's own usage/cost, which we sum for the ledger. As with the
     other reviewer CLIs, the rendered prompt travels over stdin so a large diff cannot overflow
     the OS argv limit."""
-    cmd = ["pi", "--provider", "openrouter", "--model", model, "--print", "--mode", "json",
+    cmd = ["pi", "--provider", pi_provider, "--model", model, "--print", "--mode", "json",
            "--no-session", "--no-context-files", "--no-skills", "--no-extensions",
            "--no-prompt-templates", "--tools", PI_TOOLS]
     r = sh(cmd, cwd=cwd, env=env, stdin_text=prompt)
     out = {"returncode": r.returncode, "raw_stderr": r.stderr[-3000:]}
-    text, cost, in_tok, out_tok, cached, err = "", 0.0, 0, 0, 0, ""
+    if getattr(r, "timed_out", False):
+        out["timed_out"] = True  # SphereCeti: the attempt deadline expired
+    text, cost, in_tok, out_tok, cached, reas_tok, err = "", 0.0, 0, 0, 0, 0, ""
     for line in r.stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -793,6 +801,7 @@ def run_pi(prompt, cwd, model, env):
         in_tok += u.get("input") or 0
         out_tok += u.get("output") or 0
         cached += u.get("cacheRead") or 0  # pi reports `input` as FRESH tokens, cacheRead separate
+        reas_tok += u.get("reasoning") or 0
     # Cost from the single-source price table, cache-aware — NOT pi's self-reported usage.cost.total,
     # which uses pi's own price table and over-states some models (e.g. minimax ~2.6x vs OpenRouter's
     # actual rate). pi's `input` is fresh (non-cached) input with cacheRead alongside, so add them:
@@ -800,12 +809,21 @@ def run_pi(prompt, cwd, model, env):
     # table is authoritative. pi's figure is kept as provider_cost_usd for cross-check.
     pin, pout = PRICES.get(model, DEFAULT_PRICE)
     computed = (in_tok * pin + cached * CACHE_READ.get(model, pin) + out_tok * pout) / 1e6
-    out.update(text=text,
-               usage={"input_tokens": in_tok, "cached_input_tokens": cached, "output_tokens": out_tok},
+    usage = {"input_tokens": in_tok, "cached_input_tokens": cached, "output_tokens": out_tok}
+    if reas_tok:
+        usage["reasoning_output_tokens"] = reas_tok
+    out.update(text=text, usage=usage,
                cost_usd=round(computed, 6), cost_estimated=True,
                provider_cost_usd=round(cost, 6), session_id=None)
+    if err:
+        out.update(is_error=True, error_message=err)
     # Surface why pi produced no usable answer (pi returns 0 even when the model errored, so
     # an empty text or a captured errorMessage is the real failure signal — keep it diagnosable).
     if r.returncode != 0 or not text:
         out.update(raw_stdout=r.stdout[-3000:], error_message=err)
     return out
+
+
+def run_gemini(prompt, cwd, model, env):
+    """SphereCeti local adaptation: drive a direct Google Gemini API model through `pi`."""
+    return run_pi(prompt, cwd, model, env, pi_provider="google")
