@@ -81,10 +81,17 @@ def main() -> int:
     if request.get("shadow_budget_usd") is not None:
         bound_shadow_budget(review, request["shadow_budget_usd"])
     allowed = set(request["executables"])
+    gemini_agent = str(Path(__file__).with_name("gemini_agent.py"))
+    gemini_allowed = "gemini" in request.get("providers", ())
+    reviewers.GEMINI_AGENT_CMD = [sys.executable, "-I", gemini_agent]
 
     def guard(event, args):
         if event == "subprocess.Popen":
             executable, argv, cwd, env = args
+            if (gemini_allowed and str(executable) == sys.executable
+                    and isinstance(argv, list) and argv[:3] == [sys.executable, "-I", gemini_agent]
+                    and str(cwd) == request["workspace"]):
+                return
             if str(executable) not in allowed or str(cwd) != request["workspace"]:
                 raise RuntimeError("review engine attempted a non-provider subprocess")
         elif event.startswith(("socket.", "os.exec", "os.spawn", "os.posix_spawn")) or event in (

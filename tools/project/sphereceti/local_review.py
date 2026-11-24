@@ -32,7 +32,7 @@ from .review_resources import digest, stage_engine, tooling_files
 RUBRICS = ("correctness", "reuse", "scope", "attribution", "api-design", "generality",
            "placement", "naming", "documentation", "proof-quality")
 PROVIDERS = {"claude": "claude", "sonnet": "claude", "codex": "codex", "kiro": "kiro-cli",
-             "deepseek": "pi", "minimax": "pi", "grok": "pi"}
+             "deepseek": "pi", "minimax": "pi", "grok": "pi", "gemini": None}
 DOCUMENTS = ("README.md", "CONVENTIONS.md", "MIGRATION.md", "PROVENANCE.md", "UPSTREAM.md",
              "VALIDATION.md", "INFRASTRUCTURE-PLAN.md")
 UPSTREAM = "afb424eda89e8ac96d9eb69f6a88972055a4cd1b"
@@ -83,6 +83,7 @@ def add_parser(commands):
     p.add_argument("--claude-model")
     p.add_argument("--codex-model", default="gpt-6.1-sol", help="exact Codex review model (default: %(default)s)")
     p.add_argument("--kiro-model")
+    p.add_argument("--gemini-model")
     return p
 
 
@@ -382,6 +383,10 @@ def engine_environment(providers, auth):
         keys.append("KIRO_API_KEY")
     if selected & {"deepseek", "minimax", "grok"}:
         keys.append("OPENROUTER_API_KEY")
+    if "gemini" in selected:
+        keys.append("GEMINI_API_KEY")
+        if os.environ.get("SPHERECETI_GEMINI_API_BASE", "").startswith("http://127.0.0.1:"):
+            keys.append("SPHERECETI_GEMINI_API_BASE")
     for key in keys:
         if key in os.environ:
             env[key] = os.environ[key]
@@ -420,8 +425,10 @@ def execution_settings(args, prefs):
     providers = (args.provider or prefs.provider).split(",")
     if any(p not in PROVIDERS for p in providers):
         raise ReviewError("choose an explicit --provider (or operator preference) before running a review")
-    if any(not shutil.which(PROVIDERS[p]) for p in providers):
+    if any(PROVIDERS[p] and not shutil.which(PROVIDERS[p]) for p in providers):
         raise ReviewError("a selected provider executable is unavailable")
+    if "gemini" in providers and not os.environ.get("GEMINI_API_KEY", "").strip():
+        raise ReviewError("provider gemini requires GEMINI_API_KEY in the environment")
     budget = args.budget_usd if args.budget_usd is not None else prefs.budget_usd
     if not 0 < budget < float("inf") or not 0 < args.max_call_cost <= budget:
         raise ReviewError("set a finite positive --budget-usd and --max-call-cost no greater than that budget")
@@ -469,7 +476,7 @@ def execute(args, prefs, report, workspace: Path, engine: Path, store: Path, out
                # Local engine adaptation: bounded attempts, no Codex sub-agents, unknown-usage stop.
                "--attempt-timeout", str(args.attempt_timeout), "--codex-single-agent",
                "--usage-stop-file", str(output / "usage-stop.json")]
-    for name in ("claude_model", "codex_model", "kiro_model", "reply_rubric", "reply_file", "replies_json"):
+    for name in ("claude_model", "codex_model", "kiro_model", "gemini_model", "reply_rubric", "reply_file", "replies_json"):
         value = getattr(args, name)
         if value:
             command += ["--" + name.replace("_", "-"), str(value)]
@@ -485,7 +492,9 @@ def execute(args, prefs, report, workspace: Path, engine: Path, store: Path, out
                + json.dumps(report, indent=2))
     request = output / "engine-request.json"
     write_json(request, {"engine": str(engine), "workspace": str(workspace), "arguments": command,
-                         "context": context, "executables": sorted({PROVIDERS[p] for p in providers}),
+                         "context": context,
+                         "providers": providers,
+                         "executables": sorted({PROVIDERS[p] for p in providers if PROVIDERS[p]}),
                          "shared_budget_ledger": str(ledger_file) if args.shadow else None,
                          "shadow_budget_usd": args.shadow_budget_usd if args.shadow else None})
     interrupted = None

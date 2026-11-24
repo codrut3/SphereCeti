@@ -77,6 +77,12 @@ ATTEMPT_TIMEOUT = None
 CODEX_SINGLE_AGENT = False
 ATTEMPT_TIMEOUT_EXIT = 124
 _KILL_GRACE_S = 5
+# SphereCeti local adaptation: built-in stdlib read-only Gemini runner command.
+# `review_bridge.py` sets this to the installed package's exact interpreter and script path.
+GEMINI_AGENT_CMD = [
+    sys.executable, "-I",
+    str(pathlib.Path(__file__).resolve().parents[2] / "project" / "sphereceti" / "gemini_agent.py"),
+]
 
 
 def _stop_group(process):
@@ -252,6 +258,14 @@ def reviewer_env(provider, keys, subscription=False):
             src = _kiro_auth_db()
             if src.exists():
                 _copy_kiro_auth_db(src, _kiro_data_dir(home) / "data.sqlite3")
+    elif provider == "gemini":
+        # SphereCeti local adaptation: direct Google Gemini API via the built-in read-only runner.
+        # Always uses GEMINI_API_KEY (no subscription/OAuth path); the clean throwaway HOME carries
+        # only this key, and the runner exposes read-only workspace-jailed tools with no shell.
+        env["GEMINI_API_KEY"] = keys.get("gemini", "")
+        api_base = os.environ.get("SPHERECETI_GEMINI_API_BASE", "")
+        if api_base.startswith("http://127.0.0.1:"):
+            env["SPHERECETI_GEMINI_API_BASE"] = api_base
     elif provider in OPENROUTER_MODELS:
         # OpenRouter via pi: there is no subscription/OAuth concept — it is always an API
         # key, in both auth modes. The clean HOME carries ONLY this key, so a prompt-injected
@@ -808,4 +822,45 @@ def run_pi(prompt, cwd, model, env):
     # an empty text or a captured errorMessage is the real failure signal — keep it diagnosable).
     if r.returncode != 0 or not text:
         out.update(raw_stdout=r.stdout[-3000:], error_message=err)
+    return out
+
+
+def run_gemini(prompt, cwd, model, env):
+    """SphereCeti local adaptation: drive a direct Google Gemini API model via the built-in
+    stdlib read-only runner (`gemini_agent.py`), with isolated HOME, `GEMINI_API_KEY`, and
+    workspace-jailed read/grep/list/find tools (no shell, write, or edit)."""
+    cmd = [*GEMINI_AGENT_CMD, "--model", model]
+    r = sh(cmd, cwd=cwd, env=env, stdin_text=prompt)
+    out = {"returncode": r.returncode, "raw_stderr": r.stderr[-3000:]}
+    if getattr(r, "timed_out", False):
+        out["timed_out"] = True  # SphereCeti: the attempt deadline expired
+    try:
+        d = json.loads(r.stdout) if r.stdout.strip() else None
+        if not isinstance(d, dict):
+            raise ValueError(f"no JSON result object in {len(r.stdout)}-byte Gemini runner output")
+    except Exception as exc:
+        out.update(text="", parse_error=str(exc), raw_stdout=r.stdout[-3000:], session_id=None)
+        return out
+    usage = d.get("usage") if isinstance(d.get("usage"), dict) else {}
+    in_tok = usage.get("input_tokens") or 0
+    cached = usage.get("cached_input_tokens") or 0
+    out_tok = usage.get("output_tokens") or 0
+    pin, pout = PRICES.get(model, DEFAULT_PRICE)
+    computed = (in_tok * pin + cached * CACHE_READ.get(model, pin) + out_tok * pout) / 1e6
+    out.update(
+        text=d.get("text") or "",
+        usage=usage,
+        cost_usd=round(computed, 6),
+        cost_estimated=True,
+        session_id=None,
+        tool_trace=d.get("tool_trace") or [],
+        tool_trace_meta=d.get("tool_trace_meta") or {},
+        is_error=bool(d.get("is_error")),
+    )
+    if d.get("error_status") is not None:
+        out["error_status"] = d["error_status"]
+    if d.get("error_message"):
+        out["error_message"] = d["error_message"]
+    if r.returncode != 0 or not out["text"] or out["is_error"]:
+        out["raw_stdout"] = r.stdout[-3000:]
     return out

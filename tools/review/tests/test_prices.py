@@ -29,6 +29,14 @@ def test_sol_61_is_priced_at_its_own_rates():
     review.require_priced(review.dispatch_models(codex_model="gpt-6.1-sol"))
 
 
+# SphereCeti local adaptation: direct Google Gemini API models are priced and dispatchable.
+def test_gemini_models_are_priced():
+    assert pricing.GEMINI_MODEL == "gemini-4-carbon"
+    for model in ("gemini-4-carbon", "gemini-4-argon", "gemini-4-neon",
+                  "gemini-4-hydrogen", "gemini-3.8-flash"):
+        review.require_priced(review.dispatch_models(gemini_model=model))
+
+
 def test_price_windows_are_well_formed():
     bad = []
     for model, windows in review._PRICE_WINDOWS.items():
@@ -63,8 +71,9 @@ def test_price_windows_are_well_formed():
 
 def _write_fields(model):
     """The cache-write rate fields `model`'s provider bills by, and nothing else: Anthropic prices
-    a write by its TTL, OpenAI prices one write rate, and the OpenRouter route reports no writes."""
-    if "/" in model:
+    a write by its TTL, OpenAI prices one write rate, and OpenRouter / Google Gemini (implicit
+    caching only) bill no cache writes."""
+    if "/" in model or model.startswith("gemini-"):
         return ()
     return ("cache_write_5m", "cache_write_1h") if model.startswith("claude-") else ("cache_write",)
 
@@ -153,6 +162,11 @@ def test_the_rates_in_force_are_the_providers_list_prices():
         "deepseek/deepseek-v4-pro": (0.435, 0.87, 0.004),
         "minimax/minimax-m3":       (0.3,   1.2,  0.3),
         "x-ai/grok-4.3":            (1.25,  2.5,  1.25),
+        "gemini-4-carbon":          (2.0,   10.0, 0.1),
+        "gemini-4-argon":           (2.0,   10.0, 0.1),
+        "gemini-4-neon":            (3.0,   15.0, 0.15),
+        "gemini-4-hydrogen":        (1.5,   7.5,  0.075),
+        "gemini-3.8-flash":         (0.75,  3.75, 0.075),
     }
     assert sorted(expected) == sorted(review._PRICE_WINDOWS), (
         "a model was added to or removed from prices.json without updating this list: "

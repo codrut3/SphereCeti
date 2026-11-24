@@ -20,7 +20,8 @@ PROVIDER_DOWN = {  # the engine's provider-down kinds (runner/review.py PROVIDER
     "quota_exhausted": "wait for {provider}'s usage window to reset, then rerun",
     "rate_limited": "{provider} is rate limiting this account; rerun later",
 }
-LOGIN = {"codex": "codex login", "claude": "claude /login", "sonnet": "claude /login", "kiro": "kiro-cli login"}
+LOGIN = {"codex": "codex login", "claude": "claude /login", "sonnet": "claude /login",
+         "kiro": "kiro-cli login", "gemini": "export GEMINI_API_KEY=..."}
 
 
 def engine_defaults() -> dict:
@@ -47,6 +48,8 @@ def effective_models(args, providers) -> list[str]:
             out.append(defaults.get("SONNET_MODEL"))
         elif provider == "kiro":
             out.append(args.kiro_model or defaults.get("KIRO_MODEL"))
+        elif provider == "gemini":
+            out.append(getattr(args, "gemini_model", None) or defaults.get("GEMINI_MODEL"))
         else:
             env = os.environ.get(f"TAUCETI_{provider.upper()}_MODEL") or os.environ.get(f"{provider.upper()}_MODEL")
             out.append(env or defaults.get(provider) or "unknown")

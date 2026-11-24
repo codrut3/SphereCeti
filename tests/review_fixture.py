@@ -99,6 +99,7 @@ prompt = sys.stdin.read()
 root = pathlib.Path(__file__).parent
 assert "GH_TOKEN" not in os.environ
 assert "OPENAI_API_KEY" not in os.environ
+assert "GEMINI_API_KEY" not in os.environ
 assert "PERSONAL_SECRET" not in os.environ
 assert os.environ.get("ANTHROPIC_API_KEY") == "test-provider-key"
 assert ".tauceti-rev/rev-claude-" in os.environ["HOME"]
@@ -131,7 +132,7 @@ auth = home / "auth.json"
 call = {"argv": sys.argv[1:], "openai_key": os.environ.get("OPENAI_API_KEY"),
         "codex_home": str(home), "tmpdir": os.environ.get("TMPDIR"), "home": os.environ["HOME"],
         "auth": auth.read_text() if auth.exists() else None,
-        "leaked": sorted(k for k in ("GH_TOKEN", "PERSONAL_SECRET", "ANTHROPIC_API_KEY") if k in os.environ)}
+        "leaked": sorted(k for k in ("GH_TOKEN", "PERSONAL_SECRET", "ANTHROPIC_API_KEY", "GEMINI_API_KEY") if k in os.environ)}
 if sys.argv[1:3] == ["login", "--with-api-key"]:
     call["login_key"] = sys.stdin.read()
     with (root / "codex-calls.jsonl").open("a") as f:
@@ -196,7 +197,8 @@ if (root / "codex-exit").exists():  # report everything, then fail
         (self.bin / "codex").chmod(0o755)
         self.env ={**os.environ, "HOME": str(self.home), "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
                     "GH_TOKEN": "test-github-token-must-not-reach-provider", "PERSONAL_SECRET": "test-personal-secret",
-                    "ANTHROPIC_API_KEY": "test-provider-key", "OPENAI_API_KEY": "test-unselected-provider"}
+                    "ANTHROPIC_API_KEY": "test-provider-key", "OPENAI_API_KEY": "test-unselected-provider",
+                    "GEMINI_API_KEY": "test-gemini-key"}
         self.env.pop("PYTHONPATH", None)
         self.env.pop("CODEX_HOME", None)
 

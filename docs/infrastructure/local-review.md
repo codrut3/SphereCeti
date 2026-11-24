@@ -212,7 +212,9 @@ inputs, `--head`/`--base`/`--description-file`) need an explicit number.
 
 `--auth api` uses the selected provider's API credential instead.
 Supported providers are the imported engine's Claude, Sonnet, Codex, Kiro, DeepSeek, MiniMax,
-and Grok adapters. Tests invoke only a fake executable, never these services.
+and Grok adapters, plus SphereCeti's direct Google Gemini API adapter (`--provider gemini`,
+driven through the built-in zero-dependency read-only Python runner with `GEMINI_API_KEY`).
+Tests invoke only a fake executable or loopback mock server, never these services.
 
 Without `--source-repo` or local dependency stores, the adapter fetches exact commits into
 its private Git cache. It never checks out or executes candidate configuration. An explicit
@@ -426,6 +428,23 @@ Following [#148](https://github.com/TauCetiProject/TauCetiReview/pull/148)
 round token totals use one convention across providers: `input_tokens` is all input traffic,
 with fresh, cache-read and cache-write components. Archived runs keep the provider's raw
 usage and exact model.
+
+## Gemini model selection and accounting
+
+`--provider gemini` drives a direct Google Gemini API model through SphereCeti's built-in
+stdlib read-only runner (`sphereceti/gemini_agent.py`), requiring no Node/npm or third-party CLI.
+The runner executes in an isolated `python -I` subprocess under the throwaway reviewer `HOME`
+with only `GEMINI_API_KEY` (in both `--auth api` and default `--auth subscription` modes), and
+exposes only workspace-jailed read-only tools (`read_file`, `grep`, `list_dir`, `find_files` —
+no shell, write, or edit).
+
+`--gemini-model MODEL` pins the exact Gemini model for both `review` and `worker run --execute`;
+otherwise the default `gemini-4-carbon` applies. Priced models in `runner/prices.json` are
+`gemini-4-carbon`, `gemini-4-argon`, `gemini-4-neon`, `gemini-4-hydrogen`, and `gemini-3.8-flash`
+(from `ai.google.dev/gemini-api/docs/pricing`; implicit caching only, no cache-write fee, unified
+1M context window). Unpriced models are rejected before inference. Token accounting uses Gemini's
+`usageMetadata` (fresh input separate from `cachedContentTokenCount`, thinking tokens billed in
+`output`), normalized into comparable round totals alongside the other providers.
 
 ## Validation and next boundary
 

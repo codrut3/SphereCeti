@@ -19,6 +19,11 @@ CODEX_FALLBACK_MODEL = "gpt-5.6-terra"
 # entitled Kiro model with --kiro-model.
 KIRO_MODEL = "gpt-5.6-sol"
 
+# SphereCeti local adaptation: direct Google Gemini API reviewer driven through SphereCeti's
+# built-in zero-dependency read-only runner (`gemini_agent.py` + `GEMINI_API_KEY`). Explicit-only
+# (never auto-drawn); callers may pin another priced Gemini model with --gemini-model.
+GEMINI_MODEL = "gemini-4-carbon"
+
 # OpenRouter models driven through the `pi` agent (badlogic/pi-mono): a third reviewer
 # family alongside claude/codex, selectable as --providers/--reviewer deepseek|minimax.
 # Pay-per-token, so they run only when explicitly named — never auto-drawn. Add a row here
@@ -79,7 +84,7 @@ SONNET_MODEL = "claude-sonnet-4-6"
 
 
 
-def dispatch_models(claude_model=CLAUDE_MODEL, codex_model=CODEX_MODEL):
+def dispatch_models(claude_model=CLAUDE_MODEL, codex_model=CODEX_MODEL, gemini_model=GEMINI_MODEL):
     """Every model id the engine can dispatch — the set that must be priced. Includes the codex
     fallback, since the seamless downgrade in run_one can route any codex run to it."""
     return {
@@ -87,6 +92,7 @@ def dispatch_models(claude_model=CLAUDE_MODEL, codex_model=CODEX_MODEL):
         codex_model,
         CODEX_FALLBACK_MODEL,
         SONNET_MODEL,
+        gemini_model,
         *OPENROUTER_MODELS.values(),
     }
 
@@ -119,7 +125,7 @@ def usage_totals(provider, usage):
     inp = count("input_tokens")
     cached = count("cache_read_input_tokens") if "cache_read_input_tokens" in usage else count("cached_input_tokens")
     written = count("cache_creation_input_tokens") if "cache_creation_input_tokens" in usage else count("cache_write_input_tokens")
-    separate = (provider in {"claude", "sonnet"} or provider in OPENROUTER_MODELS
+    separate = (provider in {"claude", "sonnet", "gemini"} or provider in OPENROUTER_MODELS
                 or "cache_read_input_tokens" in usage or "cache_creation_input_tokens" in usage)
     total = inp + cached + written if separate else inp
     fresh = inp if separate else max(0, inp - cached - written)

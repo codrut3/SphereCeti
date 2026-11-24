@@ -21,13 +21,13 @@ import reviewers  # SphereCeti: module switches for the opt-in attempt bounds
 from dataclasses import dataclass, field
 
 from ledger import Ledger
-from pricing import CLAUDE_MODEL, CODEX_FALLBACK_MODEL, CODEX_MODEL, KIRO_MODEL, OPENROUTER_MODELS, PRICES_SHA, SONNET_MODEL, require_priced, sum_usage
+from pricing import CLAUDE_MODEL, CODEX_FALLBACK_MODEL, CODEX_MODEL, GEMINI_MODEL, KIRO_MODEL, OPENROUTER_MODELS, PRICES_SHA, SONNET_MODEL, require_priced, sum_usage
 # Re-exported for merge_from_scoreboard (changed_paths/decide_merge/DEFAULT_RUBRICS) and the price
 # tests, which read these as review.X — kept importable here though review.py no longer uses them.
 from pricing import PRICES, _PRICE_WINDOWS, dispatch_models  # noqa: F401
 from verdict import extract_verdict, has_new_contest, is_blocking, is_unresolved, newest_reply_id, overall_label, posts_review_thread, state_of, today
 from merge import changed_paths, decide_merge
-from reviewers import build_prompt, ci_status_block, cleanup_rev_home, codex_model_unavailable, exact_kiro_model, reject_retired_opus, reviewer_env, run_claude, run_codex, run_kiro, run_pi, sweep_rev_homes
+from reviewers import build_prompt, ci_status_block, cleanup_rev_home, codex_model_unavailable, exact_kiro_model, reject_retired_opus, reviewer_env, run_claude, run_codex, run_gemini, run_kiro, run_pi, sweep_rev_homes
 from casefile import build_reactivation_block, normalize_finding_path, pick_anchor, update_case_file
 from render import meta_block, render_contest_reply, render_scoreboard, render_thread, rubrics_fingerprint, thread_meta
 
@@ -67,13 +67,14 @@ def public_record(value):
 # payload. Ordered: the first pattern to match wins, so the specific precede `unknown`.
 _ERROR_KINDS = (
     ("not_authenticated", re.compile(r"not logged in|/login|invalid authentication|unauthorized|401"
-                                     r"|token has been revoked|failed to authenticate", re.I)),
+                                     r"|token has been revoked|failed to authenticate"
+                                     r"|api_key_invalid|api key not valid|unauthenticated", re.I)),
     # The subscription CLIs report an exhausted plan as prose, with no status code anywhere:
     # "You've hit your session limit · resets 9:30pm (UTC)", "You've hit your weekly limit",
     # "You've hit your monthly spend limit". Every one of those is a wait, never a review.
     ("quota_exhausted", re.compile(r"hit your (?:session|weekly|monthly|usage)\b"
                                    r"|usage limit reached|spend limit", re.I)),
-    ("rate_limited", re.compile(r"rate limit|too many requests|429", re.I)),
+    ("rate_limited", re.compile(r"rate limit|too many requests|429|resource_exhausted", re.I)),
     ("overloaded", re.compile(r"overloaded|service unavailable|\b(?:502|503|529)\b", re.I)),
     ("timed_out", re.compile(r"timed? ?out|deadline exceeded|\b504\b", re.I)),
     ("model_unavailable", re.compile(r"not supported when using|do not have access|unknown model|\b404\b", re.I)),
@@ -383,6 +384,9 @@ def usage_unknown_reason(provider, r):
         if not all(type(v) is int and v >= 0 for v in counts) or counts[1] > counts[0]:
             return "incomplete"
         return None
+    if provider == "gemini" and r.get("returncode") != 0:
+        has_tokens = isinstance(usage, dict) and any(type(v) is int and v > 0 for v in usage.values())
+        return "exit_nonzero_after_usage" if has_tokens else "exit_nonzero"
     cost = r.get("cost_usd")
     return None if type(cost) in (int, float) and 0 <= cost < float("inf") else "not_reported"
 
@@ -731,10 +735,14 @@ def main():
                          "used as chosen.")
     ap.add_argument("--kiro-model", default=KIRO_MODEL,
                     help=f"exact Kiro reviewer model (default: {KIRO_MODEL}); Kiro is explicit-only")
+    ap.add_argument("--gemini-model", default=GEMINI_MODEL,
+                    help=f"exact direct Google Gemini API reviewer model (default: {GEMINI_MODEL}); "
+                         "explicit-only, uses built-in read-only runner + GEMINI_API_KEY")
     ap.add_argument("--providers", default="claude,codex",
-                    help="comma-separated reviewers to draw from: claude, codex, and any "
-                         "Kiro (explicit-only), and any OpenRouter model in OPENROUTER_MODELS "
-                         "(deepseek, minimax — via the `pi` "
+                    help="comma-separated reviewers to draw from: claude, codex, "
+                         "kiro (explicit-only), gemini (explicit-only, direct Google Gemini API "
+                         "via built-in runner + GEMINI_API_KEY), and any OpenRouter model in "
+                         "OPENROUTER_MODELS (deepseek, minimax, grok — via the `pi` "
                          "agent, needs OPENROUTER_API_KEY). A rubric's prior provider is kept only "
                          "if still listed; otherwise it is re-drawn from this set")
     ap.add_argument("--auto-subset", action="store_true",
@@ -810,7 +818,7 @@ def main():
     elif a.keys_dir:
         kd = pathlib.Path(a.keys_dir)
         keys = {}
-        for name in ("anthropic", "openai", "kiro", "openrouter"):
+        for name in ("anthropic", "openai", "kiro", "openrouter", "gemini"):
             f = kd / name
             keys[name] = f.read_text().strip() if f.exists() else ""
             # Read into memory then remove from disk: no key should sit on a filesystem a
@@ -828,6 +836,10 @@ def main():
     # logins there, but DeepSeek/MiniMax still need OPENROUTER_API_KEY).
     if not keys.get("openrouter"):
         keys["openrouter"] = os.environ.get("OPENROUTER_API_KEY", "")
+    # SphereCeti local adaptation: direct Google Gemini API also uses an API key in both auth
+    # modes (keys-dir file or ambient GEMINI_API_KEY).
+    if not keys.get("gemini"):
+        keys["gemini"] = os.environ.get("GEMINI_API_KEY", "")
 
     store = pathlib.Path(a.store)
     ledger_path = store / "ledger.json"
@@ -1032,6 +1044,7 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     runners = {"claude": (run_claude, a.claude_model), "codex": (run_codex, a.codex_model or CODEX_MODEL),
                "kiro": (run_kiro, a.kiro_model),
+               "gemini": (run_gemini, a.gemini_model),
                # sonnet is the same claude CLI runner pinned to Sonnet — a cheaper claude-family
                # A/B arm, selected explicitly (never auto-drawn) via --reviewer sonnet.
                "sonnet": (run_claude, SONNET_MODEL)}
